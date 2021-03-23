@@ -1,5 +1,7 @@
 # Broadlink RM REST Server
 
+This version is patch, of creation original of raman325, compatible with all model blasters RM4
+
 ## Purpose
 This Python based web server provides REST interactivity with any local [Broadlink RM*](http://www.ibroadlink.com/rm/) type IR/RF blasters.
 
