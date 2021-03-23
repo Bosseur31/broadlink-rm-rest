@@ -1,13 +1,14 @@
+import time
 import codecs
 from logging import getLogger
 import os
-from time import sleep
 
 import broadlink
 from peewee import AutoField, IntegerField, Model, SqliteDatabase, TextField
 
 STATUS_TIMEOUT = float(os.environ.get("BROADLINK_STATUS_TIMEOUT", "1"))
 DISCOVERY_TIMEOUT = float(os.environ.get("BROADLINK_DISCOVERY_TIMEOUT", "5"))
+LEARNING_TIMEOUT = float(os.environ.get("BROADLINK_LEARNING_TIMEOUT", "30"))
 
 _LOGGER = getLogger(__name__)
 
@@ -28,6 +29,7 @@ class Blaster(BaseBlastersModel):
     ip = TextField()
     port = IntegerField()
     devtype = IntegerField()
+    devicetype = TextField()
     mac = TextField(unique=True)
     mac_hex = TextField(unique=True)
     name = TextField(unique=True, null=True)
@@ -38,9 +40,14 @@ class Blaster(BaseBlastersModel):
 
     @property
     def device(self):
-        device = broadlink.rm(
-            host=(self.ip, self.port), mac=dec_hex(self.mac_hex), devtype=self.devtype
-        )
+        if self.devicetype == "rm2":
+            device = broadlink.rm(
+                host=(self.ip, self.port), mac=dec_hex(self.mac_hex), devtype=self.devtype
+            )
+        else:
+            device = broadlink.rm4(
+                host=(self.ip, self.port), mac=dec_hex(self.mac_hex), devtype=self.devtype
+            )
         try:
             device.auth()
         except broadlink.exceptions.NetworkTimeoutError:
@@ -91,16 +98,17 @@ class Blaster(BaseBlastersModel):
         if device:
             device.enter_learning()
 
-            sleep(2)
-            value = device.check_data()
-            x = 0
-
-            for _ in range(1, 6):
-                value = device.check_data()
-                if value:
-                    break
+            start = time.time()
+            while time.time() - start < LEARNING_TIMEOUT:
+                time.sleep(1)
+                try:
+                    value = device.check_data()
+                except (broadlink.exceptions.ReadError, broadlink.exceptions.StorageError):
+                    continue
                 else:
-                    sleep(2)
+                    break
+            else:
+                return None
 
             if value and value.replace(b"\x00", b"") != b"":
                 try:
@@ -161,6 +169,7 @@ def get_new_blasters(timeout=DISCOVERY_TIMEOUT):
                 ip=blaster.host[0],
                 port=blaster.host[1],
                 devtype=blaster.devtype,
+                devicetype=blaster.get_type().lower(),
                 mac_hex=mac_hex,
                 mac=friendly_mac_from_hex(mac_hex),
                 name=None,
